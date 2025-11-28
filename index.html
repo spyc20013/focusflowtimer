@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual Focus Timer</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23A78BFA'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-.25-13h-.5V7c0-.55-.45-1-1-1s-1 .45-1 1v4c0 .55.45 1 1 1h3c.55 0 1-.45 1-1s-.45-1-1-1h-2.5z'/%3E%3C/svg%3E">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=DM+Mono:wght@500;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Tone.js for the alarm sound -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+    
+    <style>
+        /* Define CSS variables for themes (Easier to manage mode colors) */
+        :root {
+            --color-pomodoro: #be123c; /* Rose 700 */
+            --color-short-break: #2563eb; /* Blue 700 */
+            --color-long-break: #047857; /* Emerald 700 */
+            --color-active: var(--color-pomodoro); /* Default active color */
+            --color-background: #1f2937;
+            --color-container: #2c3e50;
+        }
+
+        /* Mode-specific colors for the progress bar stroke */
+        /* These classes set the '--color-active' variable on the appContainer */
+        .mode-pomodoro { --color-active: var(--color-pomodoro); }
+        .mode-short-break { --color-active: var(--color-short-break); }
+        .mode-long-break { --color-active: var(--color-long-break); }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, var(--color-background), #374151);
+            color: #e0e0e0;
+        }
+        .timer-container {
+            background-color: var(--color-container);
+            /* The box-shadow dynamically uses the '--color-active' variable defined by the mode classes */
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6), 0 0 10px var(--color-active); 
+            transition: background-color 0.5s ease-in-out, box-shadow 0.5s ease, border-color 0.5s ease;
+            border: 2px solid rgba(255, 255, 255, 0.05);
+        }
+
+        /* --- Mode Buttons --- */
+        .mode-btn {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #e0e0e0;
+            transition: all 0.3s ease-in-out;
+        }
+        .mode-btn:hover:not(.active) {
+            background-color: rgba(255, 255, 255, 0.25);
+            transform: scale(1.05);
+        }
+        .mode-btn.active {
+            background-color: var(--color-active);
+            color: white;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), 0 0 10px var(--color-active);
+            font-weight: 800;
+        }
+
+        /* --- Timer Display (Circular Progress Bar) --- */
+        .timer-display {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            margin: 0 auto 3rem;
+        }
+        .timer-circle {
+            width: 100%;
+            height: 100%;
+            transform: rotate(-90deg); /* Start progress from the top */
+        }
+        .timer-track {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.1);
+            stroke-width: 10;
+        }
+        .timer-progress {
+            fill: none;
+            stroke: var(--color-active); /* Uses the CSS variable for active color */
+            stroke-width: 10;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 1s linear, stroke 0.5s ease;
+        }
+        .time-text {
+            font-family: 'DM Mono', monospace;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 5rem; /* Large font size */
+            font-weight: 700;
+            text-shadow: 0 0 10px rgba(0, 0, 0, 0.5), 0 0 20px var(--color-active, #A78BFA);
+        }
+        
+        /* --- Start/Stop Button --- */
+        #start-stop-btn {
+            background-color: #A78BFA; /* Violet 400 */
+            color: #1f2937;
+            box-shadow: 0 6px 15px rgba(167, 139, 250, 0.4);
+        }
+        #start-stop-btn:hover {
+            background-color: #8B5CF6;
+        }
+        #start-stop-btn.running {
+            background-color: #ef4444; /* Red 500 */
+            color: white;
+            box-shadow: 0 6px 15px rgba(239, 68, 68, 0.4);
+        }
+
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen">
+
+    <div id="app" class="timer-container mode-pomodoro p-8 md:p-12 rounded-2xl w-11/12 max-w-lg text-center">
+        
+        <h1 class="text-3xl font-extrabold text-white mb-8 tracking-wider">
+            Visual Focus Timer
+        </h1>
+
+        <!-- Mode Selector -->
+        <div class="mode-selector flex justify-center space-x-3 mb-10 bg-black bg-opacity-20 p-2.5 rounded-xl backdrop-blur-sm shadow-inner">
+            <button id="pomodoro-btn" class="mode-btn active px-4 py-2 text-sm font-semibold rounded-lg">
+                Focus (25m)
+            </button>
+            <button id="short-break-btn" class="mode-btn px-4 py-2 text-sm font-semibold rounded-lg">
+                Short Break (5m)
+            </button>
+            <button id="long-break-btn" class="mode-btn px-4 py-2 text-sm font-semibold rounded-lg">
+                Long Break (15m)
+            </button>
+        </div>
+
+        <!-- Timer Display with SVG Progress Bar -->
+        <div class="timer-display">
+            <svg class="timer-circle" viewBox="0 0 100 100">
+                <!-- Track (Background) -->
+                <circle class="timer-track" cx="50" cy="50" r="45"></circle>
+                <!-- Progress Indicator -->
+                <circle id="timer-progress" class="timer-progress" cx="50" cy="50" r="45"></circle>
+            </svg>
+            <div id="time" class="time-text">25:00</div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls flex justify-center space-x-6">
+            <button id="start-stop-btn" class="px-10 py-5 text-xl rounded-full shadow-lg transition transform duration-200 ease-in-out hover:scale-105 active:scale-95">
+                START
+            </button>
+            <button id="reset-btn" class="px-5 py-4 text-xl rounded-full shadow-lg bg-gray-700 text-white hover:bg-gray-600 transition transform duration-200 ease-in-out hover:scale-105 active:scale-95">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2.134m15.357 2.134H15" />
+                </svg>
+            </button>
+        </div>
+        
+        <!-- Custom Message Box for alerts -->
+        <div id="message-box" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center p-4 z-50 transition-opacity duration-300">
+            <div class="p-8 rounded-xl max-w-sm text-center transform scale-95 opacity-0 transition duration-300 ease-out">
+                <p id="message-text" class="text-xl font-semibold mb-6"></p>
+                <button id="message-ok-btn" class="text-white px-6 py-3 rounded-lg bg-violet-700 hover:bg-violet-500 hover:shadow-lg transition duration-300">OK</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const DURATION = {
+            'pomodoro': 25 * 60,
+            'short-break': 5 * 60,
+            'long-break': 15 * 60,
+        };
+        const COLOR_CLASS = {
+            'pomodoro': 'mode-pomodoro',
+            'short-break': 'mode-short-break',
+            'long-break': 'mode-long-break',
+        };
+
+        // --- DOM Elements ---
+        const appContainer = document.getElementById('app');
+        const timeDisplay = document.getElementById('time');
+        const timerProgress = document.getElementById('timer-progress');
+        const startStopBtn = document.getElementById('start-stop-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const pomodoroBtn = document.getElementById('pomodoro-btn');
+        const shortBreakBtn = document.getElementById('short-break-btn');
+        const longBreakBtn = document.getElementById('long-break-btn');
+        const modeButtons = [pomodoroBtn, shortBreakBtn, longBreakBtn];
+        const msgBox = document.getElementById('message-box');
+        const msgBoxContent = msgBox.querySelector('div');
+        const msgText = document.getElementById('message-text');
+        const msgOkBtn = document.getElementById('message-ok-btn');
+
+        // --- State Variables ---
+        let currentMode = 'pomodoro';
+        let timeLeft = DURATION[currentMode];
+        let timerInterval = null;
+        let isRunning = false;
+        
+        // --- Circular Progress Bar Constants ---
+        const radius = 45;
+        const circumference = 2 * Math.PI * radius;
+        timerProgress.style.strokeDasharray = circumference;
+        timerProgress.style.strokeDashoffset = circumference;
+
+        // --- Audio Variables and Setup ---
+        let alarmSynth = null;
+        let isAudioContextReady = false;
+
+        /**
+         * Initializes the Tone.js Audio Context and Synth.
+         */
+        function initAudio() {
+            if (isAudioContextReady) return;
+            try {
+                if (typeof Tone === 'undefined') {
+                    console.error("Tone.js not loaded. Cannot initialize audio.");
+                    return;
+                }
+                
+                // Create a pleasant, sine-wave based PolySynth chime
+                alarmSynth = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: "sine" },
+                    envelope: { attack: 0.005, decay: 0.1, sustain: 0.05, release: 0.3 }
+                }).toDestination();
+                
+                isAudioContextReady = true;
+                document.removeEventListener('click', initAudio);
+                document.removeEventListener('touchstart', initAudio);
+
+            } catch (e) {
+                console.error("Failed to initialize Tone.js:", e);
+            }
+        }
+        
+        /**
+         * Plays a short alarm chime.
+         */
+        function playAlarmSound() {
+            if (!isAudioContextReady) {
+                initAudio(); 
+                if (!isAudioContextReady) return; 
+            }
+            // Play a triple chime chord (Cmaj triad)
+            alarmSynth.triggerAttackRelease(["C5", "E5", "G5"], "4n");
+        }
+
+
+        // --- Utility Functions ---
+
+        /**
+         * Custom non-blocking alert replacement.
+         */
+        function showMessage(message) {
+            msgText.textContent = message;
+            msgBoxContent.style.backgroundColor = getComputedStyle(appContainer).getPropertyValue('--color-active').trim() || '#A78BFA';
+            msgBox.classList.remove('hidden');
+            msgBox.classList.add('flex');
+            // Animate message box in
+            setTimeout(() => {
+                msgBoxContent.classList.remove('scale-95', 'opacity-0');
+                msgBoxContent.classList.add('scale-100', 'opacity-100');
+            }, 50);
+
+            if (message.includes("finished")) {
+                stopTimer();
+            }
+        }
+
+        msgOkBtn.addEventListener('click', () => {
+            // Animate message box out
+            msgBoxContent.classList.remove('scale-100', 'opacity-100');
+            msgBoxContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                msgBox.classList.add('hidden');
+                msgBox.classList.remove('flex');
+            }, 300);
+        });
+
+
+        /**
+         * Formats the total seconds into MM:SS string.
+         */
+        function formatTime(totalSeconds) {
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        /**
+         * Updates the time display, document title, and SVG progress bar.
+         */
+        function updateDisplay() {
+            const formattedTime = formatTime(timeLeft);
+            timeDisplay.textContent = formattedTime;
+            document.title = `${formattedTime} | ${currentMode.toUpperCase()} | FocusFlow`;
+            
+            // --- SVG Progress Logic ---
+            const maxDuration = DURATION[currentMode];
+            const progress = (maxDuration - timeLeft) / maxDuration;
+            const offset = circumference * progress;
+            timerProgress.style.strokeDashoffset = offset;
+        }
+
+        /**
+         * Updates the UI theme based on the current mode using CSS variables and classes.
+         */
+        function updateTheme() {
+            // 1. Remove all mode classes and apply the current one
+            Object.values(COLOR_CLASS).forEach(cls => appContainer.classList.remove(cls));
+            appContainer.classList.add(COLOR_CLASS[currentMode]);
+            
+            // 2. Update mode button styles
+            modeButtons.forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`${currentMode}-btn`).classList.add('active');
+            
+            // NOTE: The box-shadow and progress bar colors automatically update because
+            // the CSS variable '--color-active' is defined by the mode classes on appContainer.
+        }
+
+        // --- Core Timer Logic ---
+
+        function tick() {
+            if (timeLeft <= 0) {
+                // Time's up!
+                playAlarmSound(); 
+                showMessage(`${currentMode.charAt(0).toUpperCase() + currentMode.slice(1).replace('-', ' ')} finished! Time to switch modes.`);
+                
+                // Switch to the next logical mode
+                if (currentMode === 'pomodoro') {
+                    switchMode('short-break'); 
+                } else if (currentMode === 'short-break') {
+                    switchMode('pomodoro'); 
+                } else if (currentMode === 'long-break') {
+                    switchMode('pomodoro'); 
+                }
+                return;
+            }
+
+            timeLeft--;
+            updateDisplay();
+        }
+
+        function startTimer() {
+            if (isRunning) return;
+
+            isRunning = true;
+            startStopBtn.textContent = 'STOP';
+            startStopBtn.classList.add('running');
+            
+            tick(); 
+            timerInterval = setInterval(tick, 1000);
+        }
+
+        function stopTimer() {
+            if (!isRunning) return;
+
+            isRunning = false;
+            clearInterval(timerInterval);
+            timerInterval = null;
+            startStopBtn.textContent = 'START';
+            startStopBtn.classList.remove('running');
+        }
+        
+        /**
+         * Switches the timer mode and resets the time.
+         */
+        function switchMode(mode) {
+            stopTimer(); 
+            currentMode = mode;
+            timeLeft = DURATION[currentMode];
+            updateTheme();
+            updateDisplay();
+        }
+
+        // --- Event Listeners and Initialization ---
+
+        startStopBtn.addEventListener('click', () => {
+            initAudio();
+            isRunning ? stopTimer() : startTimer();
+        });
+
+        resetBtn.addEventListener('click', () => {
+            switchMode(currentMode);
+        });
+
+        pomodoroBtn.addEventListener('click', () => {
+            switchMode('pomodoro');
+        });
+
+        shortBreakBtn.addEventListener('click', () => {
+            switchMode('short-break');
+        });
+
+        longBreakBtn.addEventListener('click', () => {
+            switchMode('long-break');
+        });
+        
+        // Audio Initialization on User Interaction
+        document.addEventListener('click', initAudio, { once: true });
+        document.addEventListener('touchstart', initAudio, { once: true });
+
+
+        // Initialization on Load
+        window.onload = function() {
+            switchMode('pomodoro');
+        };
+    </script>
+
+</body>
+</html>
